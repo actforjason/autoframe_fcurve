@@ -12,7 +12,7 @@ bl_info = {
 
 
 import bpy
-from bpy.props import BoolProperty
+from bpy.props import BoolProperty, FloatProperty
 
 
 def iter_fcurves(action, slot):
@@ -39,6 +39,65 @@ class ClickAndFrame(bpy.types.Operator):
     bl_label = "Mouse Click on Channels and Frame"
     
     extend : BoolProperty(name="Extend", default=False)
+    vertical_margin : FloatProperty(
+        name="Vertical Margin",
+        default=0.08,
+        min=0.0,
+        max=1.0,
+        description="Extra vertical padding factor (e.g. 0.08 for slight comfortable breathing room)",
+    )
+
+    def frame_with_vertical_margin(self, context):
+        if self.vertical_margin <= 0.0:
+            bpy.ops.graph.view_selected('EXEC_REGION_WIN')
+            return
+
+        selected_pts = []
+        objects = list(context.selected_objects)
+        if context.object and context.object not in objects:
+            objects.append(context.object)
+
+        for obj in objects:
+            if not obj.animation_data or not obj.animation_data.action:
+                continue
+            slot = getattr(obj.animation_data, 'action_slot', None)
+            for fcurve in iter_fcurves(obj.animation_data.action, slot):
+                if not fcurve.select:
+                    continue
+                for p in fcurve.keyframe_points:
+                    if p.select_control_point:
+                        selected_pts.append(p)
+
+        if not selected_pts:
+            bpy.ops.graph.view_selected('EXEC_REGION_WIN')
+            return
+
+        ymin = float('inf')
+        ymax = float('-inf')
+        for p in selected_pts:
+            ymin = min(ymin, p.co[1], p.handle_left[1], p.handle_right[1])
+            ymax = max(ymax, p.co[1], p.handle_left[1], p.handle_right[1])
+
+        height = ymax - ymin
+        if height < 1e-4:
+            height = 1.0
+
+        pad = height * self.vertical_margin
+        target_ymin = ymin - pad
+        target_ymax = ymax + pad
+
+        p0 = selected_pts[0]
+        p1 = selected_pts[-1]
+        orig_h0 = p0.handle_left[1]
+        orig_h1 = p1.handle_right[1]
+
+        try:
+            p0.handle_left[1] = target_ymin
+            p1.handle_right[1] = target_ymax
+            bpy.ops.graph.view_selected('EXEC_REGION_WIN')
+        finally:
+            p0.handle_left[1] = orig_h0
+            p1.handle_right[1] = orig_h1
 
     '''
     @classmethod
@@ -81,7 +140,7 @@ class ClickAndFrame(bpy.types.Operator):
             bpy.ops.anim.channels_click('INVOKE_DEFAULT', extend = self.extend) # click to channel
             bpy.ops.anim.channel_select_keys('INVOKE_DEFAULT', extend = self.extend) # select keys
 
-            bpy.ops.graph.view_selected('EXEC_REGION_WIN') # frame selected
+            self.frame_with_vertical_margin(context) # frame selected with vertical margin
             # TODO how to view all selected channels?
         #endregion
 
