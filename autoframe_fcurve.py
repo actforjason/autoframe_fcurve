@@ -15,8 +15,22 @@ import bpy
 from bpy.props import BoolProperty
 
 
+def iter_fcurves(action, slot):
+    # Blender 5 removed Action.fcurves, fcurves live in slot channelbags
+    layers = getattr(action, "layers", None)
+    if layers is None:
+        yield from action.fcurves
+        return
 
-############		
+    for layer in layers:
+        for strip in layer.strips:
+            for channelbag in strip.channelbags:
+                if slot is None or channelbag.slot_handle == slot.handle:
+                    yield from channelbag.fcurves
+
+
+
+############
 # CHANNELS #
 ############		
 class ClickAndFrame(bpy.types.Operator):
@@ -35,33 +49,26 @@ class ClickAndFrame(bpy.types.Operator):
     def execute(self, context):
         
         ##############################
-        # region 
+        # region
         # Save selected
         ##############################
-        obj = context.object
-
-        try:
-            action = obj.animation_data.action
-
-        # for Material shader etc.
-        except:
-            bpy.ops.anim.channels_click('INVOKE_DEFAULT', extend = self.extend)
-            return {'FINISHED'}
-
-
         selected = []
 
-        if(action != None):
-            try:
-                for fcurve in action.fcurves :
+        objects = list(context.selected_objects) # graph editor shows all selected objects
+        if( context.object and context.object not in objects ):
+            objects.append(context.object)
+
+        for obj in objects :
+
+            animation_data = obj.animation_data
+
+            if( animation_data and animation_data.action ):
+                for fcurve in iter_fcurves(animation_data.action, animation_data.action_slot) :
                     for p in fcurve.keyframe_points :
 
-                        selected.append(p.select_control_point) # state of selected
-                        selected.append(p.select_left_handle)
-                        selected.append(p.select_right_handle)
-
-            except:
-                pass
+                        selected.append((p, p.select_control_point, # state of selected
+                            p.select_left_handle,
+                            p.select_right_handle))
         #endregion
         
 
@@ -93,20 +100,12 @@ class ClickAndFrame(bpy.types.Operator):
         # region 
         # Load selected
         ##############################
-        i = 0
-        
-        if( len(selected) > 0 and selected != None ):
-            for fcurve in action.fcurves :
-                for p in fcurve.keyframe_points :
+        if( selected ):
+            for p, select_control_point, select_left_handle, select_right_handle in selected :
 
-                    p.select_control_point = selected[i]
-                    i += 1
-
-                    p.select_left_handle = selected[i]
-                    i += 1
-
-                    p.select_right_handle = selected[i]
-                    i += 1
+                p.select_control_point = select_control_point
+                p.select_left_handle = select_left_handle
+                p.select_right_handle = select_right_handle
         #endregion
         
 
